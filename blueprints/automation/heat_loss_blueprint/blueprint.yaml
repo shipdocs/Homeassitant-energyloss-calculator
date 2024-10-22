@@ -1,0 +1,101 @@
+blueprint:
+  name: Heat Loss Calculation Blueprint
+  description: >
+    This blueprint sets up utility sensors and a template sensor to calculate heat loss in Watt per degree Celsius (W/°C) and convert it to kWh/m² annually. 
+    The utility meters will track daily, weekly, monthly, and yearly heat loss.
+  domain: automation
+  input:
+    outdoor_temperature:
+      name: Outdoor Temperature Sensor
+      description: "Select the outdoor temperature sensor."
+      selector:
+        entity:
+          domain: sensor
+    indoor_temperature:
+      name: Indoor Temperature Sensor
+      description: "Select the indoor temperature sensor."
+      selector:
+        entity:
+          domain: sensor
+    power_usage:
+      name: Power Usage Sensor
+      description: "Select the sensor for daily power usage."
+      selector:
+        entity:
+          domain: sensor
+    area:
+      name: Floor Area (m²)
+      description: "Enter the floor area of your home in square meters."
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 1000
+          unit_of_measurement: "m²"
+    avg_temp_diff:
+      name: Average Temperature Difference (°C)
+      description: "Enter the average temperature difference between indoor and outdoor."
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: "°C"
+
+trigger:
+  - platform: time
+    at: "00:00:00"  # Daily update for utility meters
+
+action:
+  - service: sensor.template
+    data:
+      sensors:
+        heat_loss_rate:
+          friendly_name: "Heat Loss Rate (W/°C)"
+          value_template: >
+            {% set outdoor_temp = states(input.outdoor_temperature) | float %}
+            {% set indoor_temp = states(input.indoor_temperature) | float %}
+            {% set power_usage = states(input.power_usage) | float %}
+            {% set temp_diff = indoor_temp - outdoor_temp %}
+            {% if temp_diff > 0 and power_usage > 0 %}
+              {{ (power_usage / temp_diff) }}
+            {% else %}
+              0
+            {% endif %}
+          unit_of_measurement: "W/°C"
+
+  - service: utility_meter.create
+    data:
+      daily_heat_loss:
+        source: sensor.heat_loss_rate
+        cycle: daily
+
+  - service: utility_meter.create
+    data:
+      weekly_heat_loss:
+        source: sensor.heat_loss_rate
+        cycle: weekly
+
+  - service: utility_meter.create
+    data:
+      monthly_heat_loss:
+        source: sensor.heat_loss_rate
+        cycle: monthly
+
+  - service: utility_meter.create
+    data:
+      yearly_heat_loss:
+        source: sensor.heat_loss_rate
+        cycle: yearly
+
+  - service: sensor.template
+    data:
+      sensors:
+        annual_heat_loss:
+          friendly_name: "Annual Heat Loss (kWh/m²)"
+          value_template: >
+            {% set avg_temp_diff = input(avg_temp_diff) %}
+            {% set area = input(area) %}
+            {% set total_energy_loss = (states('sensor.heat_loss_rate') | float * avg_temp_diff * 2000) / 1000 %}
+            {{ total_energy_loss / area }}
+          unit_of_measurement: "kWh/m²/year"
